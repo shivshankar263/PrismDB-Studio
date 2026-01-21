@@ -26,6 +26,7 @@ from core.db_manager import DBManager
 from core.workers import worker_import_task, worker_export_task, worker_scan_schema
 from gui.widgets.conn_bar import ConnectionBar
 from gui.views.data_view import DataView
+from gui.views.gridfs_view import GridFSView
 from gui.views.erd_view import ErdView
 from gui.views.agg_view import AggregationView
 from gui.views.dashboard_view import DashboardView
@@ -122,11 +123,11 @@ class DatabaseTab(QWidget):
         query_layout.addWidget(QLabel("<b>Recent History</b>"))
         self.history_list = QListWidget()
         self.history_list.itemClicked.connect(self.load_saved_query)
-        
+
         # Enable Right-Click Context Menu for History
         self.history_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_history_menu)
-        
+
         query_layout.addWidget(self.history_list)
 
         self.side_tabs.addTab(query_widget, "Queries")
@@ -152,6 +153,7 @@ class DatabaseTab(QWidget):
 
         self.agg_view = AggregationView()
         self.erd_view = ErdView()
+        self.gridfs_view = GridFSView()
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
@@ -161,6 +163,7 @@ class DatabaseTab(QWidget):
         self.tabs.addTab(self.data_view, "Data Explorer")
         self.tabs.addTab(self.dashboard_view, "Dashboard")
         self.tabs.addTab(self.agg_view, "Aggregation Builder")
+        self.tabs.addTab(self.gridfs_view, "GridFS Files")
         self.tabs.addTab(self.erd_view, "Schema / ERD")
         self.tabs.addTab(self.log_view, "System Logs")
 
@@ -311,6 +314,28 @@ class DatabaseTab(QWidget):
 
         menu.exec_(QCursor.pos())
 
+    def show_history_menu(self, pos):
+        menu = QMenu(self)
+        clear_action = QAction("Clear History", self)
+        clear_action.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        clear_action.triggered.connect(self.action_clear_history)
+        menu.addAction(clear_action)
+        menu.exec_(QCursor.pos())
+
+    def action_clear_history(self):
+        reply = QMessageBox.question(
+            self,
+            "Clear History",
+            "Are you sure you want to clear all history?\nBookmarks will NOT be deleted.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if reply == QMessageBox.Yes:
+            QueryManager.clear_history()
+            self.refresh_query_sidebar()
+            QMessageBox.information(self, "Success", "Search history cleared.")
+
     def navigate_to_collection(self, target_coll_name, query):
         # Find item in collection list
         items = self.coll_list.findItems(target_coll_name, Qt.MatchExactly)
@@ -320,12 +345,12 @@ class DatabaseTab(QWidget):
             self.data_view.set_collection(coll)
             self.agg_view.set_collection(coll)
 
-            # --- FIX: Use search_widget instead of query_input ---
+            # --- FIX: Set the query on the SEARCH WIDGET, not query_input ---
             self.data_view.search_widget.set_raw_query(query)
-            # -----------------------------------------------------
+            # ----------------------------------------------------------------
 
             self.data_view.reset_and_load()
-            self.tabs.setCurrentIndex(1)
+            self.tabs.setCurrentIndex(0)  # Switch to Data View (index 0 now)
         else:
             QMessageBox.warning(
                 self, "Error", f"Collection '{target_coll_name}' not found."
@@ -357,9 +382,10 @@ class DatabaseTab(QWidget):
             query_dict = json.loads(query_str, object_hook=json_util.object_hook)
             self.data_view.search_widget.set_raw_query(query_dict)
         except Exception as e:
+            # Maybe show error in log
             pass
 
-        self.tabs.setCurrentIndex(1)  # Switch to Data Explorer
+        self.tabs.setCurrentIndex(0)  # Switch to Data Explorer (index 0)
         # self.data_view.reset_and_load() # Uncomment to auto-run
 
     def setup_shortcuts(self):
@@ -381,12 +407,14 @@ class DatabaseTab(QWidget):
     def refresh_action(self):
         idx = self.tabs.currentIndex()
         if idx == 0:
-            self.dashboard_view.refresh_stats()
-        elif idx == 1:
             self.data_view.reset_and_load()
+        elif idx == 1:
+            self.dashboard_view.refresh_stats()
         elif idx == 2:
             self.agg_view.run_pipeline()
         elif idx == 3:
+            self.gridfs_view.refresh_files()
+        elif idx == 4:
             self.trigger_erd_scan()
 
     def connect_mongo(self, uri):
@@ -401,7 +429,7 @@ class DatabaseTab(QWidget):
         self.log_view.append(f"Connected to: {self.db.name}")
         self.refresh_colls()
 
-        # Start Dashboard
+        self.gridfs_view.set_db(self.db)
         self.dashboard_view.set_db(self.db)
 
         QMessageBox.information(
@@ -416,6 +444,7 @@ class DatabaseTab(QWidget):
         self.db = None
 
         self.dashboard_view.set_db(None)
+        self.gridfs_view.set_db(None)
 
         self.coll_list.clear()
         self.data_view.table.clear()
@@ -523,8 +552,8 @@ class DatabaseTab(QWidget):
     def start_process(self, target_func, *args):
         if self.process is not None:
             return QMessageBox.warning(self, "Busy", "Background task running.")
-        # Switch to Logs Tab (index 4)
-        self.tabs.setCurrentIndex(4)
+        # Switch to Logs Tab (index 5)
+        self.tabs.setCurrentIndex(5)
         self.progress.setVisible(True)
         self.progress.setValue(0)
         self.queue = Queue()
@@ -555,7 +584,7 @@ class DatabaseTab(QWidget):
                     return
                 elif msg_type == "schema_result":
                     self.erd_view.render_schema(json.loads(content))
-                    self.tabs.setCurrentIndex(3)
+                    self.tabs.setCurrentIndex(4)
             except Exception:
                 break
 
@@ -567,28 +596,3 @@ class DatabaseTab(QWidget):
         self.process = None
         self.queue = None
         self.progress.setVisible(False)
-
-    def show_history_menu(self, pos):
-        menu = QMenu(self)
-
-        clear_action = QAction("Clear History", self)
-        clear_action.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
-        clear_action.triggered.connect(self.action_clear_history)
-        menu.addAction(clear_action)
-
-        menu.exec_(QCursor.pos())
-
-    # --- NEW: Clear History Action ---
-    def action_clear_history(self):
-        reply = QMessageBox.question(
-            self,
-            "Clear History",
-            "Are you sure you want to clear all history?\nBookmarks will NOT be deleted.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-
-        if reply == QMessageBox.Yes:
-            QueryManager.clear_history()
-            self.refresh_query_sidebar()
-            QMessageBox.information(self, "Success", "Search history cleared.")
