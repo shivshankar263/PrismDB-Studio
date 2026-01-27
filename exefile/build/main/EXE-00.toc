@@ -68,7 +68,7 @@
  [],
  False,
  False,
- 1769494086,
+ 1769515690,
  [('runw.exe',
    'D:\\myproject\\mongo_studio_pro\\venv\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],
