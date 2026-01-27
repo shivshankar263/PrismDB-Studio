@@ -26,7 +26,6 @@ from core.db_manager import DBManager
 from core.workers import worker_import_task, worker_export_task, worker_scan_schema
 from gui.widgets.conn_bar import ConnectionBar
 from gui.views.data_view import DataView
-from gui.views.gridfs_view import GridFSView
 from gui.views.erd_view import ErdView
 from gui.views.agg_view import AggregationView
 from gui.views.dashboard_view import DashboardView
@@ -120,21 +119,45 @@ class DatabaseTab(QWidget):
         self.bookmark_list.itemClicked.connect(self.load_saved_query)
         query_layout.addWidget(self.bookmark_list)
 
-        query_layout.addWidget(QLabel("<b>Recent History</b>"))
+        # History Header with Clear Button
+        hist_header_layout = QHBoxLayout()
+        hist_header_layout.addWidget(QLabel("<b>Recent History</b>"))
+
+        self.clear_hist_btn = QPushButton("Clear")
+        self.clear_hist_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_hist_btn.setToolTip("Clear Search History")
+        self.clear_hist_btn.setStyleSheet(
+            """
+            QPushButton {
+                font-size: 11px; 
+                padding: 2px 8px; 
+                color: #dc3545; 
+                border: 1px solid #dc3545;
+                background: white;
+            }
+            QPushButton:hover {
+                background: #dc3545;
+                color: white;
+            }
+        """
+        )
+        self.clear_hist_btn.clicked.connect(self.action_clear_history)
+
+        hist_header_layout.addStretch()
+        hist_header_layout.addWidget(self.clear_hist_btn)
+
+        query_layout.addLayout(hist_header_layout)
+
         self.history_list = QListWidget()
         self.history_list.itemClicked.connect(self.load_saved_query)
-
-        # Enable Right-Click Context Menu for History
         self.history_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_history_menu)
-
         query_layout.addWidget(self.history_list)
 
         self.side_tabs.addTab(query_widget, "Queries")
 
         sidebar_layout.addWidget(self.side_tabs)
         self.splitter.addWidget(sidebar_widget)
-        # -----------------------
 
         # --- RIGHT WORK AREA ---
         work_widget = QWidget()
@@ -147,25 +170,27 @@ class DatabaseTab(QWidget):
         self.dashboard_view = DashboardView()
         self.data_view = DataView()
         self.data_view.request_navigation.connect(self.navigate_to_collection)
-        self.data_view.query_executed.connect(
-            self.refresh_query_sidebar
-        )  # Update history on run
+        self.data_view.query_executed.connect(self.refresh_query_sidebar)
 
         self.agg_view = AggregationView()
+
+        # Connect ERD View
         self.erd_view = ErdView()
-        self.gridfs_view = GridFSView()
-        
         self.erd_view.request_schema_scan.connect(self.trigger_erd_scan)
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setStyleSheet("background: #212529; color: #00ff00;")
 
-        # Add Tabs
+        # Add Tabs (Index Mapping)
+        # 0: Data Explorer
+        # 1: Dashboard
+        # 2: Aggregation
+        # 3: ERD
+        # 4: Logs
         self.tabs.addTab(self.data_view, "Data Explorer")
         self.tabs.addTab(self.dashboard_view, "Dashboard")
         self.tabs.addTab(self.agg_view, "Aggregation Builder")
-        self.tabs.addTab(self.gridfs_view, "GridFS Files")
         self.tabs.addTab(self.erd_view, "Schema / ERD")
         self.tabs.addTab(self.log_view, "System Logs")
 
@@ -179,7 +204,6 @@ class DatabaseTab(QWidget):
         self.splitter.setSizes([250, 800])
         self.layout.addWidget(self.splitter)
 
-        # Initial Sidebar Load
         self.refresh_query_sidebar()
 
     # --- ACTIONS & LOGIC ---
@@ -193,21 +217,11 @@ class DatabaseTab(QWidget):
             name = data.pop("name")
             try:
                 self.db.create_collection(name, **data)
-                self.log_view.append(
-                    f"SUCCESS: Created collection '{name}' with options {data}"
-                )
+                self.log_view.append(f"SUCCESS: Created collection '{name}'")
                 QMessageBox.information(
                     self, "Success", f"Collection '{name}' created."
                 )
                 self.refresh_colls()
-            except CollectionInvalid:
-                QMessageBox.warning(
-                    self, "Error", f"Collection '{name}' already exists."
-                )
-            except OperationFailure as e:
-                QMessageBox.critical(
-                    self, "Error", f"MongoDB Error: {e.details.get('errmsg', str(e))}"
-                )
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
 
@@ -217,16 +231,15 @@ class DatabaseTab(QWidget):
         confirm = QMessageBox.question(
             self,
             "Drop Collection",
-            f"Are you sure you want to DROP '{coll_name}'?\n\nThis action cannot be undone!",
+            f"DROP '{coll_name}'?\nCannot be undone!",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
         )
         if confirm == QMessageBox.Yes:
             try:
                 self.db.drop_collection(coll_name)
                 self.log_view.append(f"SUCCESS: Dropped collection '{coll_name}'")
                 if (
-                    self.data_view.collection is not None
+                    self.data_view.collection
                     and self.data_view.collection.name == coll_name
                 ):
                     self.data_view.set_collection(None)
@@ -234,17 +247,16 @@ class DatabaseTab(QWidget):
                     self.agg_view.set_collection(None)
                 self.refresh_colls()
                 QMessageBox.information(
-                    self, "Dropped", f"Collection '{coll_name}' has been dropped."
+                    self, "Dropped", f"Collection '{coll_name}' dropped."
                 )
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to drop collection: {e}")
+                QMessageBox.critical(self, "Error", str(e))
 
     def action_manage_indexes(self, coll_name):
         if self.db is None:
             return
         try:
-            coll = self.db[coll_name]
-            dlg = IndexManagerDialog(coll, self)
+            dlg = IndexManagerDialog(self.db[coll_name], self)
             dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -253,8 +265,7 @@ class DatabaseTab(QWidget):
         if self.db is None:
             return
         try:
-            coll = self.db[coll_name]
-            dlg = SchemaDialog(coll, self)
+            dlg = SchemaDialog(self.db[coll_name], self)
             dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -265,7 +276,6 @@ class DatabaseTab(QWidget):
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         icons_dir = os.path.abspath(os.path.join(base_dir, "../../assets/icons"))
-
         icon_add = QIcon(os.path.join(icons_dir, "plus.svg"))
         icon_refresh = QIcon(os.path.join(icons_dir, "refresh.svg"))
         icon_delete = self.style().standardIcon(QStyle.SP_TrashIcon)
@@ -274,7 +284,6 @@ class DatabaseTab(QWidget):
 
         if item:
             coll_name = item.text()
-
             idx_action = QAction(f"Manage Indexes...", self)
             idx_action.setIcon(icon_gear)
             idx_action.triggered.connect(lambda: self.action_manage_indexes(coll_name))
@@ -285,7 +294,6 @@ class DatabaseTab(QWidget):
                 lambda: self.action_manage_schema(coll_name)
             )
             menu.addAction(schema_action)
-
             menu.addSeparator()
 
             export_action = QAction(f"Export '{coll_name}'...", self)
@@ -301,7 +309,6 @@ class DatabaseTab(QWidget):
                 lambda: self.action_drop_collection(coll_name)
             )
             menu.addAction(drop_action)
-
             menu.addSeparator()
 
         create_action = QAction("Create New Collection...", self)
@@ -313,7 +320,6 @@ class DatabaseTab(QWidget):
         refresh_action.setIcon(icon_refresh)
         refresh_action.triggered.connect(self.refresh_colls)
         menu.addAction(refresh_action)
-
         menu.exec_(QCursor.pos())
 
     def show_history_menu(self, pos):
@@ -328,31 +334,24 @@ class DatabaseTab(QWidget):
         reply = QMessageBox.question(
             self,
             "Clear History",
-            "Are you sure you want to clear all history?\nBookmarks will NOT be deleted.",
+            "Clear all history?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
-
         if reply == QMessageBox.Yes:
             QueryManager.clear_history()
             self.refresh_query_sidebar()
-            QMessageBox.information(self, "Success", "Search history cleared.")
 
     def navigate_to_collection(self, target_coll_name, query):
-        # Find item in collection list
         items = self.coll_list.findItems(target_coll_name, Qt.MatchExactly)
         if items:
             self.coll_list.setCurrentItem(items[0])
             coll = self.db[target_coll_name]
             self.data_view.set_collection(coll)
             self.agg_view.set_collection(coll)
-
-            # --- FIX: Set the query on the SEARCH WIDGET, not query_input ---
             self.data_view.search_widget.set_raw_query(query)
-            # ----------------------------------------------------------------
-
             self.data_view.reset_and_load()
-            self.tabs.setCurrentIndex(0)  # Switch to Data View (index 0 now)
+            self.tabs.setCurrentIndex(0)
         else:
             QMessageBox.warning(
                 self, "Error", f"Collection '{target_coll_name}' not found."
@@ -360,14 +359,12 @@ class DatabaseTab(QWidget):
 
     def refresh_query_sidebar(self, _=None):
         data = QueryManager.load()
-
         self.bookmark_list.clear()
         for b in data["bookmarks"]:
             item = QListWidgetItem(f"★ {b['name']}")
             item.setToolTip(b["query"])
             item.setData(Qt.UserRole, b["query"])
             self.bookmark_list.addItem(item)
-
         self.history_list.clear()
         for h in data["history"]:
             item = QListWidgetItem(h)
@@ -383,12 +380,9 @@ class DatabaseTab(QWidget):
         try:
             query_dict = json.loads(query_str, object_hook=json_util.object_hook)
             self.data_view.search_widget.set_raw_query(query_dict)
-        except Exception as e:
-            # Maybe show error in log
+        except Exception:
             pass
-
-        self.tabs.setCurrentIndex(0)  # Switch to Data Explorer (index 0)
-        # self.data_view.reset_and_load() # Uncomment to auto-run
+        self.tabs.setCurrentIndex(0)
 
     def setup_shortcuts(self):
         self.sc_refresh = QShortcut(QKeySequence("F5"), self)
@@ -415,8 +409,6 @@ class DatabaseTab(QWidget):
         elif idx == 2:
             self.agg_view.run_pipeline()
         elif idx == 3:
-            self.gridfs_view.refresh_files()
-        elif idx == 4:
             self.trigger_erd_scan()
 
     def connect_mongo(self, uri):
@@ -430,13 +422,8 @@ class DatabaseTab(QWidget):
         self.db = db
         self.log_view.append(f"Connected to: {self.db.name}")
         self.refresh_colls()
-
-        self.gridfs_view.set_db(self.db)
         self.dashboard_view.set_db(self.db)
-
-        QMessageBox.information(
-            self, "Connected", f"Successfully connected to database: {self.db.name}"
-        )
+        QMessageBox.information(self, "Connected", f"Connected to: {self.db.name}")
         return True
 
     def disconnect_mongo(self):
@@ -444,10 +431,7 @@ class DatabaseTab(QWidget):
             self.client.close()
         self.client = None
         self.db = None
-
         self.dashboard_view.set_db(None)
-        self.gridfs_view.set_db(None)
-
         self.coll_list.clear()
         self.data_view.table.clear()
         self.data_view.table.setRowCount(0)
@@ -459,7 +443,7 @@ class DatabaseTab(QWidget):
             reply = QMessageBox.question(
                 self,
                 "Disconnect?",
-                f"Database '{self.db.name}' is connected.\nDisconnect and close?",
+                f"Disconnect '{self.db.name}'?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
@@ -482,7 +466,7 @@ class DatabaseTab(QWidget):
                 item = QListWidgetItem(icon, name)
                 self.coll_list.addItem(item)
         except Exception as e:
-            self.log_view.append(f"Error listing collections: {e}")
+            self.log_view.append(f"Error: {e}")
 
     def select_collection(self, item):
         if self.db is None:
@@ -540,22 +524,21 @@ class DatabaseTab(QWidget):
     def trigger_erd_scan(self):
         if self.db is None:
             return QMessageBox.warning(self, "Error", "Connect to DB first.")
-        self.start_process(worker_scan_schema, self.conn_bar.uri_input.text())
-
-    def export_erd_image(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Image", "erd_diagram.png", "PNG Image (*.png)"
+        # CRITICAL FIX: Pass switch_to_logs=False to prevent jumping to logs tab
+        # And immediately switch to ERD tab (Index 3)
+        self.tabs.setCurrentIndex(3)
+        self.start_process(
+            worker_scan_schema, self.conn_bar.uri_input.text(), switch_to_logs=False
         )
-        if path:
-            img = self.erd_view.get_image()
-            img.save(path)
-            QMessageBox.information(self, "Saved", f"ERD saved to {path}")
 
-    def start_process(self, target_func, *args):
+    def start_process(self, target_func, *args, switch_to_logs=True):
         if self.process is not None:
             return QMessageBox.warning(self, "Busy", "Background task running.")
-        # Switch to Logs Tab (index 5)
-        self.tabs.setCurrentIndex(5)
+
+        # Only switch to Logs tab (Index 4) if requested
+        if switch_to_logs:
+            self.tabs.setCurrentIndex(4)
+
         self.progress.setVisible(True)
         self.progress.setValue(0)
         self.queue = Queue()
@@ -578,6 +561,9 @@ class DatabaseTab(QWidget):
                     self.log_view.append(f"LOG: {content}")
                 elif msg_type == "finished":
                     self.cleanup_process()
+                    # Optional: Don't show popup for ERD if you want it completely silent
+                    # But usually "Task Complete" is fine if we are on the right tab.
+                    # We can check if content implies Schema to skip popup if needed.
                     QMessageBox.information(self, "Task Complete", content)
                     return
                 elif msg_type == "error":
@@ -586,7 +572,7 @@ class DatabaseTab(QWidget):
                     return
                 elif msg_type == "schema_result":
                     self.erd_view.render_schema(json.loads(content))
-                    self.tabs.setCurrentIndex(4)
+                    self.tabs.setCurrentIndex(3)  # Ensure ERD tab is active (Index 3)
             except Exception:
                 break
 
