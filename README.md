@@ -1,190 +1,107 @@
-PrismDB Studio 🍃
-
-PrismDB Studio is a comprehensive, lightweight, and user-friendly desktop GUI for MongoDB management, built with Python and PySide6. Designed to bridge the gap between SQL and NoSQL workflows, it provides advanced visualization tools, a relational-style data explorer, and real-time server monitoring—all without requiring complex command-line knowledge.
-
-Whether you are a developer debugging queries, an administrator monitoring server health, or a data analyst exploring collections, PrismDB Studio offers a robust suite of tools to streamline your workflow.
-
-🚀 Key Features
-
-📊 Advanced Data Explorer
-Relational View: View document data in a clean, table-like format.
-CRUD Operations: Create, Read, Update, and Delete documents easily. Includes a built-in JSON editor for complex objects.
-Smart Search: Simplified "Field : Value" search bar with auto-completion and type detection (automatically handles ObjectIds, Booleans, and Numbers).
-Smart Pagination: Efficiently navigate through millions of documents.
-
-🔗 Visual Tools
-
-Relationship Visualizer: Automatically detects "Foreign Keys" (e.g., userId, order_id) and allows you to jump to the related document in another collection with a double-click.
-
-ERD Visualizer: Scans your database schema to generate and export an Entity-Relationship Diagram (ERD) image.
-
-Aggregation Builder: Build complex aggregation pipelines ($match, $group, $lookup, etc.) step-by-step visually and preview results instantly.
-
-🛠️ Management & Optimization
-
-Server Dashboard: Real-time health check showing active connections, memory usage, uptime, and operations per second.
-
-Schema Manager: View and edit JSON Schema validation rules to enforce data integrity.
-
-Index Manager: View, create, and drop indexes to optimize query performance.
-
-Explain Plans: Analyze query performance visually to understand execution stats and identify bottlenecks.
-
-⚡ Productivity
-
-Multi-Tab Interface: Connect to multiple databases simultaneously in different tabs.
-
-Query History & Bookmarks: Automatically saves your search history and allows you to "Star" complex queries for quick access.
-
-Clipboard Import: "Paste as Docs" feature detects JSON or CSV data in your clipboard and imports it immediately.
-
-Bulk Export/Import: Support for JSON, CSV, BSON, and SQL formats.
-
-📦 Running the Pre-compiled Application
-
-If you do not wish to install Python or dependencies, a standalone executable version is available.
-
-Navigate to the exefile directory inside the project root.
-
-You will see two essential folders:
-
-dist: Contains the main executable application file.
-
-build: Contains necessary system dependencies and build artifacts.
-
-⚠️ CRITICAL: Both the dist and build folders must exist and be kept together for the software to function correctly. Do not separate them.
-
-Open the dist folder.
-
-Double-click main.exe (or PrismDBStudio.exe) to launch the application.
-
-🛠️ Developer Setup (Run from Source)
-
-To run the application from source code, ensure you have Python 3.10+ installed.
-
-1. Clone the Repository
-
-git clone [https://github.com/shivshankar263/PrismDB-Studio.git](https://github.com/shivshankar263/PrismDB-Studio.git)
-cd prismdb-studio
-
-
-
-2. Set up Virtual Environment
-
-It is recommended to use a virtual environment to manage dependencies.
-
-Windows:
-
-python -m venv venv
-.\venv\Scripts\activate
-
-
-
-Mac/Linux:
-
-python3 -m venv venv
-source venv/bin/activate
-
-
-
-3. Install Dependencies
-
-pip install -r requirements.txt
-
-
-
-4. Run the Application
-
-python main.py
-
-
-
-⌨️ Keyboard Shortcuts
-
-Context
-
-Shortcut
-
-Action
-
-Global
-
-Ctrl + N
-
-Open New Connection Tab
-
-
-
-Ctrl + W
-
-Close Current Tab
-
-
-
-Ctrl + Tab
-
-Switch to Next Tab
-
-
-
-Ctrl + Q
-
-Exit Application
-
-Tab
-
-F5 / Ctrl + Enter
-
-Run Query / Refresh View
-
-
-
-Ctrl + E
-
-Export Data
-
-
-
-Ctrl + O
-
-Import Data
-
-
-
-Ctrl + L
-
-Focus Connection Bar
-
-Pagination
-
-Ctrl + Left
-
-Previous Page
-
-
-
-Ctrl + Right
-
-Next Page
-
-📂 Project Structure
-
+# PrismDB Studio 🍃
+
+**PrismDB Studio** is a comprehensive, lightweight, and user-friendly desktop GUI for MongoDB management. Built with **Python** and **PySide6**, it bridges the gap between SQL and NoSQL workflows by offering a relational-style data explorer, advanced visualization tools, and real-time server monitoring—all without requiring complex command-line knowledge.
+
+---
+
+## 🚀 Key Features
+
+### 📊 Advanced Data Explorer
+* **Relational View:** View MongoDB collections as tables with structured columns.
+* **Smart Search:** Simple search bar with type inference (auto-detects numbers, booleans, and ObjectIds).
+* **Foreign Key Navigation:** Double-click `_id` fields to jump to related documents in other collections automatically.
+* **Productivity:** Import JSON/CSV directly from your clipboard.
+
+### 🛠 Visual Tools
+* **Aggregation Builder:** Construct complex pipelines stage-by-stage (`$match`, `$group`, etc.) without wrestling with nested JSON syntax.
+* **ERD Visualizer:** Automatically scan your database schema and generate an Entity-Relationship Diagram (ERD) exportable to PNG.
+* **GridFS Support:** Manage large files directly within the interface.
+
+### ⚡ Management & Performance
+* **Real-time Dashboard:** Monitor active connections, memory usage, and operations per second.
+* **Query Explain Plans:** Visual analysis of query performance with health checks (warnings for inefficient collection scans).
+* **Index Manager:** Create, drop, and list indexes with a simple GUI.
+* **Schema Validation:** Edit and apply JSON Schema validation rules to collections.
+
+---
+
+## 📦 Installation & Setup
+
+### Prerequisites
+* Python 3.10+
+* MongoDB Server (Local or Remote)
+
+### Developer Setup (Running from Source)
+
+1.  **Clone the repository**
+    ```bash
+    git clone [https://github.com/your-username/prismdb-studio.git](https://github.com/your-username/prismdb-studio.git)
+    cd prismdb-studio
+    ```
+
+2.  **Create a Virtual Environment**
+    * *Windows:*
+        ```bash
+        python -m venv venv
+        .\venv\Scripts\activate
+        ```
+    * *Mac/Linux:*
+        ```bash
+        python3 -m venv venv
+        source venv/bin/activate
+        ```
+
+3.  **Install Dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Run the Application**
+    ```bash
+    python main.py
+    ```
+
+### Running the Standalone Executable
+If using the pre-built version:
+1.  Navigate to the `exefile/dist` directory.
+2.  Ensure the `build` folder (dependencies) is present in the same directory.
+3.  Launch `main.exe` or `PrismDBStudio.exe`.
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+| Context | Shortcut | Action |
+| :--- | :--- | :--- |
+| **Global** | `Ctrl + N` | Open New Connection Tab |
+| | `Ctrl + W` | Close Current Tab |
+| | `Ctrl + Tab` | Switch to Next Tab |
+| | `Ctrl + Q` | Exit Application |
+| **Tab / View** | `F5` / `Ctrl + Enter` | Run Query / Refresh View |
+| | `Ctrl + E` | Export Data |
+| | `Ctrl + O` | Import Data |
+| | `Ctrl + L` | Focus Connection Bar |
+| **Pagination** | `Ctrl + Left` | Previous Page |
+| | `Ctrl + Right` | Next Page |
+
+---
+
+## 📂 Project Structure
+
+```text
 prismdb_studio/
 ├── main.py                  # Application Entry Point
-├── assets/                  # Icons and Stylesheets
-├── config/                  # Global Settings
-├── core/                    # Backend Logic (DB Manager, Workers)
-├── gui/                     # Frontend UI
-│   ├── dialogs/             # Popups (Export, Schema, Indexes)
-│   ├── tabs/                # Main Tab Logic
-│   ├── views/               # Specific Views (Data, Dashboard, Aggregation)
-│   └── widgets/             # Reusable UI Components
-└── utils/                   # Helpers (Query Manager, JSON tools)
-
-
-
-📝 License
-
-This project is open-source and available for educational and professional use.
-
-Developed with ❤️ using Python & PySide6.
+├── settings.py              # Global Constants (Version, Defaults)
+├── assets/                  # Icons and Stylesheets (styles.qss)
+├── core/                    # Backend Logic
+│   ├── db_manager.py        # Database Connection Handler
+│   └── workers.py           # Background Tasks (Import/Export/Scan)
+├── gui/                     # Frontend UI (PySide6)
+│   ├── main_window.py       # Main Application Container
+│   ├── dialogs/             # Popups (Create Collection, Explain, Index Manager)
+│   ├── tabs/                # Tab Logic (db_tab.py)
+│   ├── views/               # Feature Views (Data, Dashboard, Aggregation, ERD)
+│   └── widgets/             # Reusable Components (ConnectionBar)
+└── utils/                   # Helpers
+    ├── helpers.py           # Type Mapping & SQL Escaping
+    └── query_manager.py     # History & Bookmark Persistence
