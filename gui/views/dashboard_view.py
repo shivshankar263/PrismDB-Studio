@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QFrame,
     QGridLayout,
+    QSizePolicy, # Added QSizePolicy
 )
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont, QColor
@@ -67,6 +68,10 @@ class DashboardView(QWidget):
         self.conn_bar.setStyleSheet(
             "QProgressBar::chunk { background-color: #198754; }"
         )
+        # --- FIX: Prevent vertical expansion ---
+        self.conn_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.conn_bar.setFixedHeight(15) 
+        # ---------------------------------------
         self.layout.addWidget(self.conn_bar)
 
         self.layout.addSpacing(10)
@@ -143,3 +148,4 @@ class DashboardView(QWidget):
         except Exception as e:
             self.info_lbl.setText(f"Error fetching stats: {e}")
             self.timer.stop()
+            

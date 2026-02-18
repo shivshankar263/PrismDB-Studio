@@ -7,7 +7,7 @@ from datetime import datetime
 from pymongo import MongoClient
 from pymongo.errors import ConfigurationError
 from bson import json_util, ObjectId
-from utils.helpers import map_mongo_type_to_pg, sql_escape, filter_doc
+from utils.helpers import map_mongo_type_to_pg, sql_escape, filter_doc, resolve_sql_type
 
 
 # --- IMPORT WORKER (Unchanged) ---
@@ -82,7 +82,7 @@ def worker_import_task(uri, files, queue):
             client.close()
 
 
-# --- EXPORT WORKER (Fixed Arguments) ---
+# --- EXPORT WORKER (Updated for PostgreSQL Fallback) ---
 def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
     """
     Export logic.
@@ -119,33 +119,51 @@ def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
             queue.put(("finished", "No collections found to export."))
             return
 
-        if fmt == "sql":
+        # Handle both generic SQL and specific PostgreSQL requests
+        if fmt in ["sql", "postgresql"]:
             file_name = f"dump_{db.name}_{int(time.time())}.sql"
             full_path = os.path.join(folder, file_name)
 
             with open(full_path, "w", encoding="utf-8") as f:
-                f.write(f"-- Export: {db.name} | {time.ctime()}\nBEGIN;\n\n")
+                f.write(f"-- Export: {db.name} | {time.ctime()}\n")
+                f.write(f"-- Format: {fmt.upper()}\nBEGIN;\n\n")
 
                 for idx, name in enumerate(filtered_colls):
                     queue.put(
                         ("progress", f"SQL Export: {name}", int((idx / total) * 100))
                     )
                     try:
-                        sample_docs = list(db[name].find({}).limit(50))
+                        # 1. Analyze Schema with proper fallback logic
+                        # Sample 100 docs to detect mixed types
+                        sample_docs = list(db[name].find({}).limit(100))
                         if not sample_docs:
                             continue
 
-                        columns = {}
-                        if include_meta:
-                            columns["_id"] = "TEXT PRIMARY KEY"
+                        # Track all unique types seen for each field
+                        field_types = {} 
 
                         for doc in sample_docs:
                             doc = filter_doc(doc, include_meta)
                             for key, val in doc.items():
-                                if key == "_id":
-                                    continue
-                                if key not in columns:
-                                    columns[key] = map_mongo_type_to_pg(val)
+                                if key == "_id": continue
+                                if val is None: continue
+                                
+                                # Identify Python Type
+                                t = type(val)
+                                if isinstance(val, ObjectId): t = ObjectId
+                                if isinstance(val, datetime): t = datetime
+                                
+                                if key not in field_types:
+                                    field_types[key] = set()
+                                field_types[key].add(t)
+
+                        # Resolve types using fallback logic
+                        columns = {}
+                        if include_meta:
+                            columns["_id"] = "TEXT PRIMARY KEY"
+
+                        for key, types_set in field_types.items():
+                            columns[key] = resolve_sql_type(types_set)
 
                         if not columns:
                             continue
@@ -157,6 +175,7 @@ def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
                         )
                         f.write(f'CREATE TABLE "{name}" (\n    {cols_def}\n);\n')
 
+                        # 2. Write Data
                         f.write(
                             f'INSERT INTO "{name}" ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n'
                         )
@@ -187,7 +206,7 @@ def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
 
                 f.write("COMMIT;\n")
         else:
-            # JSON/CSV/BSON Logic
+            # JSON/CSV/BSON Logic (Unchanged)
             for idx, name in enumerate(filtered_colls):
                 queue.put(
                     ("progress", f"Exporting {name}...", int((idx / total) * 100))

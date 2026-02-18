@@ -8,7 +8,7 @@ class ExportDialog(QDialog):
 
         layout.addWidget(QLabel("Select Format:"))
         self.combo = QComboBox()
-        self.combo.addItems(["json", "sql", "csv", "bson"])
+        self.combo.addItems(["json", "sql", "postgresql","csv", "bson"])
         layout.addWidget(self.combo)
 
         self.meta_check = QCheckBox("Export Metadata (_id, __v)")
