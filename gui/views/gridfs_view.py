@@ -24,6 +24,88 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPixmap, QImage, QFont, QAction, QCursor
 
 
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    QPushButton,
+    QLabel,
+    QSplitter,
+    QHeaderView,
+    QFileDialog,
+    QMessageBox,
+    QTextEdit,
+    QScrollArea,
+    QAbstractItemView,
+    QMenu,
+    QStyle,
+    QDialog,
+    QFormLayout,
+    QLineEdit
+)
+
+class MetadataDialog(QDialog):
+    def __init__(self, filename, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Upload: {filename}")
+        self.layout = QVBoxLayout(self)
+        
+        self.metadata = {}
+        
+        # Meta Table
+        self.layout.addWidget(QLabel("Metadata (Optional):"))
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(["Key", "Value"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.layout.addWidget(self.table)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("+ Add Key")
+        add_btn.clicked.connect(self.add_row)
+        btn_layout.addWidget(add_btn)
+        
+        del_btn = QPushButton("- Remove")
+        del_btn.clicked.connect(self.remove_row)
+        btn_layout.addWidget(del_btn)
+        self.layout.addLayout(btn_layout)
+        
+        # OK/Cancel
+        ok_btn = QPushButton("Upload")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        
+        action_layout = QHBoxLayout()
+        action_layout.addStretch()
+        action_layout.addWidget(cancel_btn)
+        action_layout.addWidget(ok_btn)
+        self.layout.addLayout(action_layout)
+        
+    def add_row(self):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+    
+    def remove_row(self):
+        cur = self.table.currentRow()
+        if cur >= 0:
+            self.table.removeRow(cur)
+            
+    def get_metadata(self):
+        meta = {}
+        for i in range(self.table.rowCount()):
+            k_item = self.table.item(i, 0)
+            v_item = self.table.item(i, 1)
+            if k_item and v_item:
+                key = k_item.text().strip()
+                val = v_item.text().strip()
+                if key:
+                    meta[key] = val
+        return meta
+
+
 class GridFSView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -177,6 +259,15 @@ class GridFSView(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Upload File")
         if path:
             filename = os.path.basename(path)
+            
+            # --- METADATA DIALOG ---
+            dlg = MetadataDialog(filename, self)
+            if dlg.exec_() != QDialog.Accepted:
+                return # Cancelled
+            
+            metadata = dlg.get_metadata()
+            # -----------------------
+
             try:
                 # Detect MIME type
                 mime_type, _ = mimetypes.guess_type(path)
@@ -184,8 +275,9 @@ class GridFSView(QWidget):
                     mime_type = "application/octet-stream"
 
                 with open(path, "rb") as f:
-                    self.fs.put(f, filename=filename, contentType=mime_type)
-                QMessageBox.information(self, "Success", f"Uploaded '{filename}'")
+                    self.fs.put(f, filename=filename, contentType=mime_type, metadata=metadata)
+                
+                QMessageBox.information(self, "Success", f"Uploaded '{filename}' with {len(metadata)} tags.")
                 self.refresh_files()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Upload failed: {e}")

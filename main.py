@@ -3,18 +3,13 @@ import os
 import multiprocessing
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon # <--- NEW IMPORT
+from PySide6.QtCore import QSettings
 
 # Ensure the root directory is in sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from gui.main_window import MainWindow
-
-def load_stylesheet():
-    path = os.path.join(os.path.dirname(__file__), "assets", "styles.qss")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return f.read()
-    return ""
+from utils.theme_manager import apply_theme
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
@@ -30,9 +25,10 @@ if __name__ == "__main__":
         app.setWindowIcon(QIcon(icon_path))
     # ----------------------------------------------------
     
-    # Load Styles
-    qss = load_stylesheet()
-    app.setStyleSheet(qss)
+    # Load Theme
+    settings = QSettings("PrismDB", "Studio")
+    current_theme = settings.value("theme", "Light")
+    apply_theme(app, current_theme)
     
     win = MainWindow()
     win.show()

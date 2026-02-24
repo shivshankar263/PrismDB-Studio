@@ -1,8 +1,10 @@
 import sys
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox
-from PySide6.QtGui import QKeySequence, QShortcut, QCloseEvent
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox, QApplication
+from PySide6.QtGui import QKeySequence, QShortcut, QCloseEvent, QActionGroup
+from PySide6.QtCore import QSettings
 from config.settings import APP_TITLE, WINDOW_SIZE
 from gui.tabs.db_tab import DatabaseTab
+from utils.theme_manager import apply_theme
 
 
 class MainWindow(QMainWindow):
@@ -10,6 +12,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
         self.resize(*WINDOW_SIZE)
+        self.settings = QSettings("PrismDB", "Studio")
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
@@ -39,8 +42,40 @@ class MainWindow(QMainWindow):
             "Export All from Current DB...", self.action_export_current
         )
 
+        view_menu = menu.addMenu("View")
+        theme_menu = view_menu.addMenu("Theme")
+        
+        self.action_theme_light = theme_menu.addAction("Light")
+        self.action_theme_light.setCheckable(True)
+        self.action_theme_dark = theme_menu.addAction("Dark")
+        self.action_theme_dark.setCheckable(True)
+        self.action_theme_system = theme_menu.addAction("System Default")
+        self.action_theme_system.setCheckable(True)
+
+        theme_group = QActionGroup(self)
+        theme_group.addAction(self.action_theme_light)
+        theme_group.addAction(self.action_theme_dark)
+        theme_group.addAction(self.action_theme_system)
+        theme_group.setExclusive(True)
+
+        self.action_theme_light.triggered.connect(lambda: self.set_theme("Light"))
+        self.action_theme_dark.triggered.connect(lambda: self.set_theme("Dark"))
+        self.action_theme_system.triggered.connect(lambda: self.set_theme("System Default"))
+        
+        current_theme = self.settings.value("theme", "Light")
+        if current_theme == "Dark":
+            self.action_theme_dark.setChecked(True)
+        elif current_theme == "System Default":
+            self.action_theme_system.setChecked(True)
+        else:
+            self.action_theme_light.setChecked(True)
+
         help_menu = menu.addMenu("Help")
         help_menu.addAction("About", self.show_about)
+
+    def set_theme(self, theme_name):
+        self.settings.setValue("theme", theme_name)
+        apply_theme(QApplication.instance(), theme_name)
 
     def setup_global_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self.add_new_tab)

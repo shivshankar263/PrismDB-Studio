@@ -1,0 +1,19 @@
+# PrismDB Studio - Features
+
+## 📊 Advanced Data Explorer
+- **Relational View:** Table-based document viewer with structured columns.
+- **Smart Search:** Type-aware search (ObjectIds, numbers, booleans, and strings).
+- **Foreign Key Navigation:** Double-click `_id` fields to jump to related documents.
+- **Clipboard Import:** Paste JSON or CSV data directly into the collection.
+
+## 🛠 Visual Tools
+- **Aggregation Builder:** Stage-by-stage pipeline constructor ($match, $group, $project, etc.).
+- **ERD Visualizer:** Automatic schema scanning and Entity-Relationship Diagram generation.
+- **GridFS Support:** View, upload, and download files stored in GridFS.
+- **Schema Validation:** Edit JSON Schema validation rules.
+
+## ⚡ Management & Performance
+- **Real-time Dashboard:** Monitor active connections, memory, and op counters.
+- **Index Manager:** View, create, and drop indexes.
+- **Query Explain:** Visual performance analysis for queries.
+- **Async Connection:** Non-blocking database connection handling.

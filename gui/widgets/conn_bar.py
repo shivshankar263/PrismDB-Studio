@@ -55,11 +55,9 @@ class ConnectionBar(QFrame):
             QApplication.processEvents()
             
             if self.on_connect_callback:
-                success = self.on_connect_callback(uri)
-                if success:
-                    self.set_connected_state()
-                else:
-                    self.set_disconnected_state()
+                self.on_connect_callback(uri)
+                # Async: State is updated by the callback's success/error signals
+                pass
 
     def set_connected_state(self):
         self.is_connected = True

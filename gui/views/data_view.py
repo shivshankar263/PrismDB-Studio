@@ -112,6 +112,13 @@ class SimpleSearchWidget(QFrame):
             except:
                 pass
 
+        # 6. Fallback to Regex for Partial String Matches inside Nested/Normal Strings
+        # If it looks like a normal string word or phrase without quotes, try regex match for better usability
+        if isinstance(value, str) and not (val_txt.startswith('"') or val_txt.startswith("'")):
+            # Escape regex characters just in case
+            safe_val = re.escape(value)
+            return {field: {"$regex": safe_val, "$options": "i"}}
+
         return {field: value}
 
     def set_raw_query(self, query_dict):
@@ -682,12 +689,27 @@ class DataView(QWidget):
     def scan_schema_keys(self):
         if self.collection is None:
             return
+            
+        def extract_keys(doc, prefix=""):
+            keys = set()
+            if isinstance(doc, dict):
+                for k, v in doc.items():
+                    full_key = f"{prefix}.{k}" if prefix else k
+                    keys.add(full_key)
+                    
+                    if isinstance(v, dict):
+                        keys.update(extract_keys(v, full_key))
+                    elif isinstance(v, list) and v and isinstance(v[0], dict):
+                        # Sample the first item of an array of objects
+                        keys.update(extract_keys(v[0], full_key))
+            return keys
+            
         try:
             pipeline = [{"$sample": {"size": 20}}]
             samples = list(self.collection.aggregate(pipeline))
             self.schema_keys = set()
             for doc in samples:
-                self.schema_keys.update(doc.keys())
+                self.schema_keys.update(extract_keys(doc))
             self.search_widget.set_fields(list(self.schema_keys))
         except Exception as e:
             print(f"Schema scan warning: {e}")

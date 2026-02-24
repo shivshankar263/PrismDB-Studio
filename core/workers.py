@@ -5,12 +5,12 @@ import time
 import bson
 from datetime import datetime
 from pymongo import MongoClient
-from pymongo.errors import ConfigurationError
+from pymongo.errors import ConfigurationError, BulkWriteError
 from bson import json_util, ObjectId
-from utils.helpers import map_mongo_type_to_pg, sql_escape, filter_doc
+from utils.helpers import map_mongo_type_to_pg, sql_escape, filter_doc, resolve_sql_type
 
 
-# --- IMPORT WORKER (Unchanged) ---
+# --- IMPORT WORKER (Fixed: Streaming) ---
 def worker_import_task(uri, files, queue):
     client = None
     try:
@@ -34,36 +34,70 @@ def worker_import_task(uri, files, queue):
                 coll = db[coll_name]
                 ext = os.path.splitext(filename)[1].lower()
 
+                def safe_insert_many(collection, docs):
+                    try:
+                        # ordered=False allows continuing even if some inserts fail (e.g. duplicates)
+                        collection.insert_many(docs, ordered=False)
+                    except BulkWriteError as bwe:
+                        # Ignore duplicate key errors (code 11000), raise others
+                        for err in bwe.details.get('writeErrors', []):
+                            if err.get('code') != 11000:
+                                raise bwe
+
                 if ext == ".json":
+                    # Improved JSON Import: Handle JSON Array stream or JSONL
                     with open(file_path, "r", encoding="utf-8") as f:
-                        try:
+                        # Peek first char
+                        first_char = f.read(1)
+                        f.seek(0)
+                        
+                        if first_char == "[":
+                            # Array Handling
+                            file_size = os.path.getsize(file_path)
+                            if file_size > 50 * 1024 * 1024: # 50MB
+                                queue.put(("log", f"WARNING: Large JSON array '{filename}' ({file_size/1024/1024:.1f} MB). High Memory Usage!"))
+                            
                             data = json.load(f, object_hook=json_util.object_hook)
                             if isinstance(data, list):
                                 if data:
-                                    coll.insert_many(data)
+                                    batch_size = 1000
+                                    for i in range(0, len(data), batch_size):
+                                        safe_insert_many(coll, data[i:i+batch_size])
                             else:
-                                coll.insert_one(data)
-                        except json.JSONDecodeError:
-                            f.seek(0)
+                                try:
+                                    coll.insert_one(data)
+                                except Exception:
+                                    pass # Skip duplicate for single insert too
+                        
+                        else:
+                            # JSONL Handling
                             batch = []
                             for line in f:
-                                if line.strip():
-                                    batch.append(
-                                        json.loads(
-                                            line, object_hook=json_util.object_hook
-                                        )
-                                    )
+                                line = line.strip()
+                                if not line: continue
+                                try:
+                                    doc = json.loads(line, object_hook=json_util.object_hook)
+                                    batch.append(doc)
                                     if len(batch) >= 1000:
-                                        coll.insert_many(batch)
+                                        safe_insert_many(coll, batch)
                                         batch = []
+                                except json.JSONDecodeError:
+                                    continue 
                             if batch:
-                                coll.insert_many(batch)
+                                safe_insert_many(coll, batch)
+
                 elif ext == ".bson":
+                    # FIXED: Use decode_file_iter for true streaming
                     with open(file_path, "rb") as f:
-                        data = bson.decode_all(f.read())
-                        if data:
-                            for i in range(0, len(data), 5000):
-                                coll.insert_many(data[i : i + 5000])
+                        batch = []
+                        for doc in bson.decode_file_iter(f):
+                            batch.append(doc)
+                            if len(batch) >= 1000:
+                                safe_insert_many(coll, batch)
+                                batch = []
+                        if batch:
+                            safe_insert_many(coll, batch)
+
                 success_count += 1
             except Exception as e:
                 queue.put(("log", f"ERROR importing {filename}: {str(e)}"))
@@ -82,12 +116,10 @@ def worker_import_task(uri, files, queue):
             client.close()
 
 
-# --- EXPORT WORKER (Fixed Arguments) ---
-def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
+# --- EXPORT WORKER (Fixed: Full Scan / Two-Pass) ---
+def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=None, add_pk=False, store_json=False, pg_version=None, encoding="utf-8", limit=0, date_range=None, queue=None):
     """
-    Export logic.
-    Order of arguments MUST match start_process call:
-    (uri, folder, fmt, meta, target_colls, queue)
+    Export logic with Full Collection Scan for headers (CSV/SQL).
     """
     client = None
     try:
@@ -102,11 +134,10 @@ def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
 
         # Filter Logic
         filtered_colls = []
-        if target_colls:
-            # Export only specific requested collections
-            filtered_colls = [c for c in all_colls if c in target_colls]
+        filtered_colls = []
+        if collections:
+            filtered_colls = [c for c in all_colls if c in collections]
         else:
-            # Export ALL user collections
             filtered_colls = [
                 c
                 for c in all_colls
@@ -119,90 +150,210 @@ def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
             queue.put(("finished", "No collections found to export."))
             return
 
-        if fmt == "sql":
-            file_name = f"dump_{db.name}_{int(time.time())}.sql"
-            full_path = os.path.join(folder, file_name)
+        # Pre-calculate single file path if needed
+        single_file_path = None
+        if (fmt in ["sql", "postgresql"]) and single_file:
+            single_file_path = os.path.join(folder, f"dump_{db.name}_{int(time.time())}.sql")
+            with open(single_file_path, "w", encoding=encoding, errors="replace") as f:
+                f.write(f"-- Export: {db.name} | {time.ctime()}\n")
+                if fmt == "postgresql":
+                    f.write(f"-- Target PostgreSQL Version: {pg_version}\n")
+                    f.write(f"SET client_encoding = '{'UTF8' if encoding.lower() == 'utf-8' else 'ASCII'}';\n")
+                    f.write("SET standard_conforming_strings = on;\n")
+                    f.write("SET check_function_bodies = false;\n")
+                    f.write("SET client_min_messages = warning;\n")
+                f.write("BEGIN;\n\n")
 
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(f"-- Export: {db.name} | {time.ctime()}\nBEGIN;\n\n")
+        # Create Date Filter Query if provided
+        date_query = {}
+        if date_range:
+            from_dt, to_dt = date_range
+            
+            from_dt = datetime.combine(from_dt, datetime.min.time())
+            to_dt = datetime.combine(to_dt, datetime.max.time())
+            
+            # Generate fake ObjectIds for these dates to do a fast range check
+            from_id = ObjectId.from_datetime(from_dt)
+            to_id = ObjectId.from_datetime(to_dt)
+            
+            date_query = {"_id": {"$gte": from_id, "$lte": to_id}}
 
-                for idx, name in enumerate(filtered_colls):
-                    queue.put(
-                        ("progress", f"SQL Export: {name}", int((idx / total) * 100))
-                    )
-                    try:
-                        sample_docs = list(db[name].find({}).limit(50))
-                        if not sample_docs:
-                            continue
+        for idx, name in enumerate(filtered_colls):
+            queue.put(("progress", f"Exporting {name}...", int((idx / total) * 100)))
 
-                        columns = {}
-                        if include_meta:
-                            columns["_id"] = "TEXT PRIMARY KEY"
-
-                        for doc in sample_docs:
-                            doc = filter_doc(doc, include_meta)
+            try:
+                if fmt in ["sql", "postgresql", "csv"]:
+                    # --- PASS 1: Full Scan for Keys/Schema ---
+                    queue.put(("log", f"Analyzing schema for {name} (Full Scan)..."))
+                    
+                    all_keys = set()
+                    field_types = {} # For SQL
+                    
+                    # Optimized cursor for key scanning
+                    projection = {} if fmt == "csv" else None # CSV only needs keys
+                    cursor = db[name].find(date_query, projection=projection)
+                    if limit > 0:
+                        cursor = cursor.limit(limit)
+                    
+                    for doc in cursor:
+                        doc = filter_doc(doc, include_meta)
+                        all_keys.update(doc.keys())
+                        
+                        if fmt != "csv": # Collect types for SQL
                             for key, val in doc.items():
-                                if key == "_id":
-                                    continue
-                                if key not in columns:
-                                    columns[key] = map_mongo_type_to_pg(val)
+                                if key == "_id": continue
+                                if val is None: continue
+                                t = type(val)
+                                if isinstance(val, ObjectId): t = ObjectId
+                                if isinstance(val, datetime): t = datetime
+                                # If store_json is True, preserve dict/list types for resolution
+                                if store_json and isinstance(val, (dict, list)):
+                                    t = type(val) 
+                                elif isinstance(val, (dict, list)):
+                                     continue # Skip nested if not storing JSON (legacy behavior)
+                                
+                                if key not in field_types: field_types[key] = set()
+                                field_types[key].add(t)
 
-                        if not columns:
-                            continue
+                    sorted_keys = sorted(list(all_keys))
 
-                        f.write(f"-- Table: {name}\n")
-                        f.write(f'DROP TABLE IF EXISTS "{name}";\n')
-                        cols_def = ",\n    ".join(
-                            [f'"{c}" {t}' for c, t in columns.items()]
-                        )
-                        f.write(f'CREATE TABLE "{name}" (\n    {cols_def}\n);\n')
+                    # --- PASS 2: Write Data ---
+                    
+                    if fmt == "csv":
+                        path = os.path.join(folder, f"{name}.{fmt}")
+                        with open(path, "w", newline="", encoding=encoding, errors="replace") as f:
+                            writer = csv.DictWriter(
+                                f, fieldnames=sorted_keys, extrasaction="ignore"
+                            )
+                            writer.writeheader()
+                            
+                            cursor_write = db[name].find(date_query)
+                            if limit > 0:
+                                cursor_write = cursor_write.limit(limit)
 
-                        f.write(
-                            f'INSERT INTO "{name}" ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n'
-                        )
+                            for doc in cursor_write:
+                                doc = filter_doc(doc, include_meta)
+                                # Flat conversion for nested objects
+                                row = {}
+                                for k in sorted_keys:
+                                    v = doc.get(k, "")
+                                    if isinstance(v, (dict, list, ObjectId)):
+                                        row[k] = json_util.dumps(v)
+                                    else:
+                                        row[k] = v
+                                writer.writerow(row)
 
-                        batch = []
-                        cursor = db[name].find({})
-                        for i, doc in enumerate(cursor):
-                            doc = filter_doc(doc, include_meta)
-                            vals = []
-                            for col in columns.keys():
-                                val = doc.get(col, None)
-                                if col == "_id" and val is not None:
-                                    val = str(val)
-                                vals.append(sql_escape(val))
-                            batch.append(f"({', '.join(vals)})")
-                            if len(batch) >= 500:
-                                f.write(",\n".join(batch) + ",\n")
-                                batch = []
+                    elif fmt in ["sql", "postgresql"]:
+                         # Determine target file
+                         if single_file:
+                             target_path = single_file_path
+                             mode = "a"
+                         else:
+                             target_path = os.path.join(folder, f"{name}.sql")
+                             mode = "w"
+                         
+                         with open(target_path, mode, encoding=encoding, errors="replace") as f:
+                            if mode == "w":
+                                f.write(f"-- Export: {db.name} | Collection: {name} | {time.ctime()}\n")
+                                if fmt == "postgresql":
+                                    f.write(f"-- Target PostgreSQL Version: {pg_version}\n")
+                                    f.write(f"SET client_encoding = '{'UTF8' if encoding.lower() == 'utf-8' else 'ASCII'}';\n")
+                                    f.write("SET standard_conforming_strings = on;\n")
+                                    f.write("SET check_function_bodies = false;\n")
+                                    f.write("SET client_min_messages = warning;\n")
+                                f.write("BEGIN;\n\n")
 
-                        if batch:
-                            f.write(",\n".join(batch) + ";\n\n")
-                        else:
-                            f.write(";\n\n")
+                            # Resolve SQL Types
+                            columns = {}
+                            if add_pk:
+                                if fmt == "postgresql":
+                                    columns["id"] = "SERIAL PRIMARY KEY"
+                                else:
+                                    columns["id"] = "INTEGER PRIMARY KEY AUTOINCREMENT"
+                            
+                            if include_meta:
+                                columns["_id"] = "TEXT" # Remove PK from _id if we have a real PK
+                                if not add_pk:
+                                    columns["_id"] = "TEXT PRIMARY KEY"
 
-                    except Exception as e:
-                        queue.put(("log", f"Error exporting collection '{name}': {e}"))
-                        continue
+                            for key, types_set in field_types.items():
+                                columns[key] = resolve_sql_type(types_set)
 
-                f.write("COMMIT;\n")
-        else:
-            # JSON/CSV/BSON Logic
-            for idx, name in enumerate(filtered_colls):
-                queue.put(
-                    ("progress", f"Exporting {name}...", int((idx / total) * 100))
-                )
-                path = os.path.join(folder, f"{name}.{fmt}")
-                try:
-                    cursor = db[name].find({}).batch_size(2000)
+                            f.write(f"-- Table: {name}\n")
+                            cols_def = ",\n    ".join([f'"{c}" {t}' for c, t in columns.items()])
+                            f.write(f'CREATE TABLE IF NOT EXISTS "{name}" (\n    {cols_def}\n);\n')
+
+                            # Safer Insert Logic
+                            start_stmt = f'INSERT INTO "{name}"'
+                            end_stmt = ";"
+                            
+                            if fmt == "postgresql":
+                                end_stmt = " ON CONFLICT DO NOTHING;"
+                            else: # sql
+                                start_stmt = f'INSERT OR IGNORE INTO "{name}"'
+
+                            f.write(f'{start_stmt} ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n')
+
+                            batch = []
+                            cursor_write = db[name].find(date_query)
+                            if limit > 0:
+                                cursor_write = cursor_write.limit(limit)
+
+                            first_batch = True
+                            pk_counter = 1
+                            
+                            for doc in cursor_write:
+                                doc = filter_doc(doc, include_meta)
+                                vals = []
+                                for col in columns.keys():
+                                    if col == "id" and add_pk:
+                                        vals.append(str(pk_counter))
+                                        continue
+                                    
+                                    val = doc.get(col, None)
+                                    if col == "_id" and val is not None:
+                                        val = str(val)
+                                    
+                                    # Handle JSON serialization if enabled and val is dict/list
+                                    if store_json and isinstance(val, (dict, list)):
+                                        val = json_util.dumps(val)
+
+                                    vals.append(sql_escape(val))
+                                
+                                if add_pk: pk_counter += 1
+                                batch.append(f"({', '.join(vals)})")
+                                
+                                if len(batch) >= 500:
+                                    # If not first batch, start a new INSERT statement
+                                    if not first_batch:
+                                        f.write(f'{start_stmt} ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n')
+                                    
+                                    f.write(",\n".join(batch) + end_stmt + "\n\n")
+                                    batch = []
+                                    first_batch = False
+                            
+                            if batch:
+                                if not first_batch:
+                                     f.write(f'{start_stmt} ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n')
+                                f.write(",\n".join(batch) + end_stmt + "\n\n")
+
+                            if mode == "w":
+                                f.write("COMMIT;\n")
+
+                else:
+                    # JSON/BSON (Already decent, but keeping consistency)
+                    path = os.path.join(folder, f"{name}.{fmt}")
+                    cursor = db[name].find(date_query)
+                    if limit > 0:
+                        cursor = cursor.limit(limit)
+                    
                     if fmt == "json":
-                        with open(path, "w", encoding="utf-8") as f:
+                        with open(path, "w", encoding=encoding, errors="replace") as f:
                             f.write("[\n")
                             first = True
                             for doc in cursor:
                                 doc = filter_doc(doc, include_meta)
-                                if not first:
-                                    f.write(",\n")
+                                if not first: f.write(",\n")
                                 f.write(json_util.dumps(doc))
                                 first = False
                             f.write("\n]")
@@ -211,36 +362,14 @@ def worker_export_task(uri, folder, fmt, include_meta, target_colls, queue):
                             for doc in cursor:
                                 doc = filter_doc(doc, include_meta)
                                 f.write(bson.encode(doc))
-                    elif fmt == "csv":
-                        sample = []
-                        for doc in db[name].find({}).limit(100):
-                            sample.append(filter_doc(doc, include_meta))
-                        if not sample:
-                            continue
-                        headers = set()
-                        for d in sample:
-                            headers.update(d.keys())
 
-                        cursor = db[name].find({})
-                        with open(path, "w", newline="", encoding="utf-8") as f:
-                            writer = csv.DictWriter(
-                                f, fieldnames=list(headers), extrasaction="ignore"
-                            )
-                            writer.writeheader()
-                            for doc in cursor:
-                                doc = filter_doc(doc, include_meta)
-                                row = {
-                                    k: (
-                                        json_util.dumps(v)
-                                        if isinstance(v, (dict, list, ObjectId))
-                                        else v
-                                    )
-                                    for k, v in doc.items()
-                                }
-                                writer.writerow(row)
-                except Exception as e:
-                    queue.put(("log", f"Skipping {name} due to error: {e}"))
-                    continue
+            except Exception as e:
+                queue.put(("log", f"Skipping {name} due to error: {e}"))
+                continue
+
+        if single_file_path:
+             with open(single_file_path, "a", encoding=encoding, errors="replace") as f:
+                 f.write("COMMIT;\n")
 
         queue.put(("finished", "Bulk Export Complete."))
     except Exception as e:

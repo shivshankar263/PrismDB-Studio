@@ -1,7 +1,18 @@
 import json
 import os
+import platform
 
-HISTORY_FILE = "query_history.json"
+# Determine safe user data path
+if platform.system() == "Windows":
+    base_dir = os.environ.get("APPDATA", os.path.expanduser("~"))
+else:
+    base_dir = os.path.expanduser("~/.config")
+
+APP_DIR = os.path.join(base_dir, "PrismDBStudio")
+if not os.path.exists(APP_DIR):
+    os.makedirs(APP_DIR, exist_ok=True)
+
+HISTORY_FILE = os.path.join(APP_DIR, "query_history.json")
 
 
 class QueryManager:
@@ -23,8 +34,11 @@ class QueryManager:
 
     @staticmethod
     def save(data):
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+        try:
+            with open(HISTORY_FILE, "w") as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"Failed to save history: {e}")
 
     @staticmethod
     def add_to_history(query_str):
