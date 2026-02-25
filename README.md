@@ -130,20 +130,3 @@ prismdb_studio/
 └── utils/                   # Helpers
     ├── helpers.py           # Type Mapping & SQL Escaping
     └── query_manager.py     # History & Bookmark Persistence
-```
-
----
-
-## 🛠 Built With
-
-* [Python](https://www.python.org/) - Core language
-* [PySide6](https://doc.qt.io/qtforpython/) - Qt for Python (GUI framework)
-* [PyMongo](https://pymongo.readthedocs.io/) - MongoDB driver
-* [Pandas](https://pandas.pydata.org/) - Data manipulation and export
-* [NumPy](https://numpy.org/) - Array manipulation and math functions
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
