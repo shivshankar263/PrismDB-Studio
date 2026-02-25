@@ -35,7 +35,7 @@
 
 1.  **Clone the repository**
     ```bash
-    git clone [https://github.com/your-username/prismdb-studio.git](https://github.com/your-username/prismdb-studio.git)
+    git clone [https://github.com/shivshankar263/prismdb-studio.git](https://github.com/shivshankar263/prismdb-studio.git)
     cd prismdb-studio
     ```
 
