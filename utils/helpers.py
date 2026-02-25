@@ -1,6 +1,35 @@
 import json
 from datetime import datetime
 from bson import json_util, ObjectId
+from dateutil.parser import parse as parse_date
+
+def is_date_column(col_name):
+    if not col_name: return False
+    cl = col_name.lower()
+    
+    # User's specific mentions
+    if cl in ["tsinmilliseconds", "tsinstr", "createdatms", "localizedtsinmilliseconds", "createdatstr"]:
+        return True
+        
+    # General heuristics
+    if "date" in cl or "time" in cl or "createdat" in cl or "updatedat" in cl or cl.startswith("ts"):
+        return True
+    return False
+
+def parse_to_datetime(val):
+    if isinstance(val, datetime): return val
+    if isinstance(val, (int, float)):
+        # Check if it's in milliseconds (usually > 10000000000 for dates past 1970)
+        if val > 10000000000:
+            return datetime.fromtimestamp(val / 1000.0)
+        else:
+            return datetime.fromtimestamp(val)
+    if isinstance(val, str):
+        try:
+            return parse_date(val)
+        except:
+            pass
+    return None
 
 def map_mongo_type_to_pg(value):
     """Legacy helper for single value mapping (kept for compatibility)"""
@@ -9,15 +38,18 @@ def map_mongo_type_to_pg(value):
     if isinstance(value, int): return "BIGINT"
     if isinstance(value, float): return "NUMERIC"
     if isinstance(value, datetime): return "TIMESTAMP"
-    if isinstance(value, ObjectId): return "TEXT"
+    if isinstance(val, ObjectId): return "TEXT"
     if isinstance(value, (dict, list)): return "JSONB"
     return "TEXT"
 
-def resolve_sql_type(types_set):
+def resolve_sql_type(types_set, col_name=""):
     """
     Proper Fallback System:
     Analyzes a set of Python types found in a field and returns the safest SQL type.
     """
+    if is_date_column(col_name):
+        return "TIMESTAMP"
+        
     if not types_set:
         return "TEXT" # Default fallback for nulls
         
@@ -45,17 +77,24 @@ def resolve_sql_type(types_set):
     if all(t in (dict, list) for t in types_set):
         return "JSONB"
 
-    # If any other mix (e.g., String + Int), fallback to TEXT to prevent data loss
-    return "TEXT"
-
-def sql_escape(val):
+def sql_escape(val, col_name=""):
     if val is None: return "NULL"
-    if isinstance(val, (dict, list)):
-        return "'" + json.dumps(val, default=json_util.default).replace("'", "''") + "'"
+    
+    # Attempt to format identified date columns properly
+    if is_date_column(col_name):
+        dt = parse_to_datetime(val)
+        if dt:
+            return f"'{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
+            
     if isinstance(val, bool):
         return "TRUE" if val else "FALSE"
+    if isinstance(val, (int, float)):
+        return str(val)
     if isinstance(val, datetime):
-        return f"'{val.isoformat()}'"
+        # Format as YYYY-MM-DD HH:MM:SS for broad SQL compatibility
+        return f"'{val.strftime('%Y-%m-%d %H:%M:%S')}'"
+    if isinstance(val, (dict, list)):
+        return "'" + json.dumps(val, default=json_util.default).replace("'", "''") + "'"
     if isinstance(val, ObjectId):
         return f"'{str(val)}'"
     return "'" + str(val).replace("'", "''") + "'"

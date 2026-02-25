@@ -277,7 +277,7 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
                                     columns["_id"] = "TEXT PRIMARY KEY"
 
                             for key, types_set in field_types.items():
-                                columns[key] = resolve_sql_type(types_set)
+                                columns[key] = resolve_sql_type(types_set, key)
 
                             f.write(f"-- Table: {name}\n")
                             cols_def = ",\n    ".join([f'"{c}" {t}' for c, t in columns.items()])
@@ -318,7 +318,7 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
                                     if store_json and isinstance(val, (dict, list)):
                                         val = json_util.dumps(val)
 
-                                    vals.append(sql_escape(val))
+                                    vals.append(sql_escape(val, col))
                                 
                                 if add_pk: pk_counter += 1
                                 batch.append(f"({', '.join(vals)})")
