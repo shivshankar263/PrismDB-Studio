@@ -1,27 +1,42 @@
-# PrismDB Studio 🍃
+<h1 align="center">
+  <br>
+  PrismDB Studio 🍃
+  <br>
+</h1>
 
-**PrismDB Studio** is a comprehensive, lightweight, and user-friendly desktop GUI for MongoDB management. Built with **Python** and **PySide6**, it bridges the gap between SQL and NoSQL workflows by offering a relational-style data explorer, advanced visualization tools, and real-time server monitoring—all without requiring complex command-line knowledge.
+<h4 align="center">A comprehensive, lightweight, and user-friendly desktop GUI for MongoDB management.</h4>
+
+<p align="center">
+  <a href="#key-features">Key Features</a> •
+  <a href="#installation--setup">Installation</a> •
+  <a href="#keyboard-shortcuts">Shortcuts</a> •
+  <a href="#project-structure">Architecture</a> •
+  <a href="#built-with">Built With</a>
+</p>
 
 ---
+
+**PrismDB Studio** bridges the gap between SQL and NoSQL workflows by offering a relational-style data explorer, advanced visualization tools, and real-time server monitoring—all without requiring complex command-line knowledge. Built with **Python** and **PySide6**.
 
 ## 🚀 Key Features
 
 ### 📊 Advanced Data Explorer
-* **Relational View:** View MongoDB collections as tables with structured columns.
-* **Smart Search:** Simple search bar with type inference (auto-detects numbers, booleans, and ObjectIds).
+* **Relational View:** Table-based document viewer with structured columns instead of just nested JSON.
+* **Smart Search:** Type-aware search bar that auto-detects ObjectIds, numbers, booleans, and strings.
 * **Foreign Key Navigation:** Double-click `_id` fields to jump to related documents in other collections automatically.
-* **Productivity:** Import JSON/CSV directly from your clipboard.
+* **Clipboard Import:** Paste JSON or CSV data directly from your clipboard into the collection.
 
 ### 🛠 Visual Tools
-* **Aggregation Builder:** Construct complex pipelines stage-by-stage (`$match`, `$group`, etc.) without wrestling with nested JSON syntax.
+* **Aggregation Builder:** Construct complex pipelines stage-by-stage (`$match`, `$group`, `$project`, etc.) without wrestling with nested JSON syntax.
 * **ERD Visualizer:** Automatically scan your database schema and generate an Entity-Relationship Diagram (ERD) exportable to PNG.
-* **GridFS Support:** Manage large files directly within the interface.
+* **GridFS Support:** View, upload, manage, and download large files stored in GridFS directly within the interface.
+* **Schema Validation:** Edit and apply JSON Schema validation rules to collections easily.
 
 ### ⚡ Management & Performance
 * **Real-time Dashboard:** Monitor active connections, memory usage, and operations per second.
-* **Query Explain Plans:** Visual analysis of query performance with health checks (warnings for inefficient collection scans).
+* **Query Explain Plans:** Visual analysis of query performance with health checks (e.g., warnings for inefficient collection scans).
 * **Index Manager:** Create, drop, and list indexes with a simple GUI.
-* **Schema Validation:** Edit and apply JSON Schema validation rules to collections.
+* **Async Connection:** Non-blocking database connection handling keeps the GUI responsive.
 
 ---
 
@@ -33,39 +48,39 @@
 
 ### Developer Setup (Running from Source)
 
-1.  **Clone the repository**
-    ```bash
-    git clone [https://github.com/shivshankar263/prismdb-studio.git](https://github.com/shivshankar263/prismdb-studio.git)
-    cd prismdb-studio
-    ```
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/shivshankar263/prismdb-studio.git
+   cd prismdb-studio
+   ```
 
-2.  **Create a Virtual Environment**
-    * *Windows:*
-        ```bash
-        python -m venv venv
-        .\venv\Scripts\activate
-        ```
-    * *Mac/Linux:*
-        ```bash
-        python3 -m venv venv
-        source venv/bin/activate
-        ```
+2. **Create a Virtual Environment**
+   * **Windows:**
+     ```bash
+     python -m venv venv
+     .\venv\Scripts\activate
+     ```
+   * **Mac/Linux:**
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
 
-3.  **Install Dependencies**
-    ```bash
-    pip install -r requirements.txt
-    ```
+3. **Install Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-4.  **Run the Application**
-    ```bash
-    python main.py
-    ```
+4. **Run the Application**
+   ```bash
+   python main.py
+   ```
 
 ### Running the Standalone Executable
-If using the pre-built version:
-1.  Navigate to the `exefile/dist` directory.
-2.  Ensure the `build` folder (dependencies) is present in the same directory.
-3.  Launch `main.exe` or `PrismDBStudio.exe`.
+If you are using the pre-built version:
+1. Navigate to the `exefile/dist` directory.
+2. Ensure the `build` folder (dependencies) is present in the same directory.
+3. Launch `main.exe` or `PrismDBStudio.exe`.
 
 ---
 
@@ -92,6 +107,8 @@ If using the pre-built version:
 prismdb_studio/
 ├── main.py                  # Application Entry Point
 ├── settings.py              # Global Constants (Version, Defaults)
+├── requirements.txt         # Project Dependencies
+├── features.txt             # Feature List Reference
 ├── assets/                  # Icons and Stylesheets (styles.qss)
 ├── core/                    # Backend Logic
 │   ├── db_manager.py        # Database Connection Handler
@@ -105,3 +122,20 @@ prismdb_studio/
 └── utils/                   # Helpers
     ├── helpers.py           # Type Mapping & SQL Escaping
     └── query_manager.py     # History & Bookmark Persistence
+```
+
+---
+
+## 🛠 Built With
+
+* [Python](https://www.python.org/) - Core language
+* [PySide6](https://doc.qt.io/qtforpython/) - Qt for Python (GUI framework)
+* [PyMongo](https://pymongo.readthedocs.io/) - MongoDB driver
+* [Pandas](https://pandas.pydata.org/) - Data manipulation and export
+* [NumPy](https://numpy.org/) - Array manipulation and math functions
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
