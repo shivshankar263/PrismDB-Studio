@@ -25,6 +25,14 @@
 * **Smart Search:** Type-aware search bar that auto-detects ObjectIds, numbers, booleans, and strings.
 * **Foreign Key Navigation:** Double-click `_id` fields to jump to related documents in other collections automatically.
 * **Clipboard Import:** Paste JSON or CSV data directly from your clipboard into the collection.
+* **Robust Data Import:**
+  * **Memory-Safe Streaming:** Safely import large datasets (JSON Arrays up to 50MB+, JSONL, BSON) using streaming techniques instead of loading everything into memory.
+  * **Graceful Fallbacks:** Handles bulk write errors by automatically skipping duplicate keys (`code 11000`) while preserving other valid documents during imports.
+* **Advanced Export System:**
+  * **Versatile Formats:** Export collections to standard formats including `.json`, `.csv`, `.bson`, and robust relational formats like plain `.sql` and `.postgresql`.
+  * **Smart Schema Analysis:** Performs a full collection scan prior to CSV/SQL exports to dynamically map diverse NoSQL document structures to flat relational headers.
+  * **Relational Conversion (SQL/PostgreSQL):** Convert MongoDB data to SQL inserts natively. Options include auto-generating Primary Keys (Auto-Increment / Serial), handling `_id` as either `TEXT` or `PRIMARY KEY`, and serializing nested JSON arrays/dicts gracefully.
+  * **PostgreSQL Tweaks:** Generates valid PostgreSQL dumps complete with `SET client_encoding`, `standard_conforming_strings`, and `ON CONFLICT DO NOTHING` instructions for safe importing.
 
 ### 🛠 Visual Tools
 * **Aggregation Builder:** Construct complex pipelines stage-by-stage (`$match`, `$group`, `$project`, etc.) without wrestling with nested JSON syntax.
