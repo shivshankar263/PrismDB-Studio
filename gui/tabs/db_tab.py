@@ -181,6 +181,7 @@ class DatabaseTab(QWidget):
 
         self.agg_view = AggregationView()
         self.erd_view = ErdView()
+        self.erd_view.request_schema_scan.connect(self.trigger_erd_scan)
         self.gridfs_view = GridFSView()
 
         self.log_view = QTextEdit()
