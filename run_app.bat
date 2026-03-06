@@ -50,7 +50,7 @@ call venv\Scripts\activate.bat
 
 :: Install/Upgrade dependencies
 echo [INFO] Ensuring pip is up to date...
-python -m pip install --upgrade pip >nul 2>&1
+python -m pip install pip >nul 2>&1
 echo [INFO] Installing/Verifying dependencies from requirements.txt...
 pip install -r requirements.txt
 if %errorlevel% neq 0 (

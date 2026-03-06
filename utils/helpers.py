@@ -1,7 +1,35 @@
 import json
+import re
 from datetime import datetime
 from bson import json_util, ObjectId
 from dateutil.parser import parse as parse_date
+
+def to_snake_case(name):
+    if not name: return ""
+    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    name = re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+    # Replace anything non-alphanumeric with underscores and clean up dupes
+    name = re.sub(r'[^a-zA-Z0-9]', '_', name)
+    return re.sub(r'_+', '_', name).strip('_')
+
+def to_camel_case(name):
+    if not name: return ""
+    # Convert to snake case first to standardize
+    s = to_snake_case(name)
+    components = s.split('_')
+    # We capitalize the first letter of each component except the first one
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+def flatten_dict(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
 
 def is_date_column(col_name):
     if not col_name: return False

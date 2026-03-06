@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QStyle,
     QListWidgetItem,
     QSizePolicy, # Added QSizePolicy
+    QLineEdit,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QPixmap, QIcon
@@ -130,6 +131,22 @@ class DatabaseTab(QWidget):
         header_layout.addWidget(refresh_btn)
 
         coll_layout.addLayout(header_layout)
+
+        # ADD SEARCH BAR HERE
+        self.coll_search = QLineEdit()
+        self.coll_search.setPlaceholderText("Search collections...")
+        self.coll_search.textChanged.connect(self.filter_collections)
+        coll_layout.addWidget(self.coll_search)
+
+        # Check All / Uncheck All Buttons
+        select_layout = QHBoxLayout()
+        sel_all_btn = QPushButton("Select All")
+        sel_all_btn.clicked.connect(lambda: self.set_all_collections_checkstate(Qt.Checked))
+        unsel_all_btn = QPushButton("Unselect All")
+        unsel_all_btn.clicked.connect(lambda: self.set_all_collections_checkstate(Qt.Unchecked))
+        select_layout.addWidget(sel_all_btn)
+        select_layout.addWidget(unsel_all_btn)
+        coll_layout.addLayout(select_layout)
 
         self.coll_list = QListWidget()
         self.coll_list.itemClicked.connect(self.select_collection)
@@ -535,9 +552,30 @@ class DatabaseTab(QWidget):
             icon = self.style().standardIcon(QStyle.SP_FileIcon)
             for name in visible:
                 item = QListWidgetItem(icon, name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
                 self.coll_list.addItem(item)
+            
+            if hasattr(self, 'coll_search') and self.coll_search.text():
+                self.filter_collections(self.coll_search.text())
+
         except Exception as e:
             self.log_view.append(f"Error listing collections: {e}")
+
+    def filter_collections(self, text):
+        text = text.lower()
+        for i in range(self.coll_list.count()):
+            item = self.coll_list.item(i)
+            if text in item.text().lower():
+                item.setHidden(False)
+            else:
+                item.setHidden(True)
+
+    def set_all_collections_checkstate(self, state):
+        for i in range(self.coll_list.count()):
+            item = self.coll_list.item(i)
+            if not item.isHidden():
+                item.setCheckState(state)
 
     def select_collection(self, item):
         if self.db is None:
@@ -552,7 +590,7 @@ class DatabaseTab(QWidget):
         dlg = ExportDialog(self)
         dlg.setWindowTitle(f"Export Collection: {coll_name}")
         if dlg.exec():
-            fmt, meta, single_file, add_pk, store_json, pg_version, encoding, limit, date_range = dlg.get_settings()
+            fmt, meta, single_file, add_pk, store_json, flatten_json, normalize, naming_conv, pg_version, encoding, limit, date_range = dlg.get_settings()
             folder = QFileDialog.getExistingDirectory(self, "Select Folder")
             if folder:
                 self.start_process(
@@ -565,6 +603,9 @@ class DatabaseTab(QWidget):
                     [coll_name],
                     add_pk,
                     store_json,
+                    flatten_json,
+                    normalize,
+                    naming_conv,
                     pg_version,
                     encoding,
                     limit,
@@ -574,11 +615,30 @@ class DatabaseTab(QWidget):
     def trigger_bulk_export(self):
         if self.db is None:
             return QMessageBox.warning(self, "Error", "Connect to DB first.")
+        
+        checked_colls = []
+        for i in range(self.coll_list.count()):
+            item = self.coll_list.item(i)
+            if item.checkState() == Qt.Checked:
+                checked_colls.append(item.text())
+        
         dlg = ExportDialog(self)
         if dlg.exec():
-            fmt, meta, single_file, add_pk, store_json, pg_version, encoding, limit, date_range = dlg.get_settings()
+            fmt, meta, single_file, add_pk, store_json, flatten_json, normalize, naming_conv, pg_version, encoding, limit, date_range = dlg.get_settings()
             folder = QFileDialog.getExistingDirectory(self, "Select Folder")
             if folder:
+                if not checked_colls:
+                    reply = QMessageBox.question(
+                        self, "Export All?", 
+                        "No collections selected. Do you want to export ALL collections?", 
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if reply == QMessageBox.No:
+                        return
+                    export_list = None
+                else:
+                    export_list = checked_colls
+
                 self.start_process(
                     worker_export_task,
                     self.conn_bar.uri_input.text(),
@@ -586,9 +646,12 @@ class DatabaseTab(QWidget):
                     fmt,
                     meta,
                     single_file,
-                    None,
+                    export_list,
                     add_pk,
                     store_json,
+                    flatten_json,
+                    normalize,
+                    naming_conv,
                     pg_version,
                     encoding,
                     limit,

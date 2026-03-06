@@ -83,6 +83,30 @@ class ExportDialog(QDialog):
         self.json_check.setToolTip("Serializes dict/list fields to JSON strings")
         layout.addWidget(self.json_check)
 
+        self.flatten_check = QCheckBox("Flatten Nested JSON to Columns")
+        self.flatten_check.setChecked(False)
+        self.flatten_check.setToolTip("Converts nested dict properties into separate top-level columns (e.g., gnssInfo_speed)")
+        layout.addWidget(self.flatten_check)
+
+        self.normalize_check = QCheckBox("Normalize Names & Types (SQL/PostgreSQL)")
+        self.normalize_check.setChecked(False)
+        self.normalize_check.setToolTip("Exports a second normalized file with standard types")
+        layout.addWidget(self.normalize_check)
+
+        # New: Naming Convention Selection
+        self.naming_label = QLabel("Naming Convention:")
+        self.naming_combo = QComboBox()
+        self.naming_combo.addItems(["snake_case", "camelCase"])
+        self.naming_label.setVisible(False)
+        self.naming_combo.setVisible(False)
+        
+        naming_layout = QHBoxLayout()
+        naming_layout.addWidget(self.naming_label)
+        naming_layout.addWidget(self.naming_combo)
+        layout.addLayout(naming_layout)
+
+        self.normalize_check.toggled.connect(self.toggle_naming_options)
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -93,6 +117,10 @@ class ExportDialog(QDialog):
     def toggle_dates(self, checked):
         self.from_date.setEnabled(checked)
         self.to_date.setEnabled(checked)
+
+    def toggle_naming_options(self, checked):
+        self.naming_label.setVisible(checked)
+        self.naming_combo.setVisible(checked)
 
     def update_ui_state(self):
         fmt = self.combo.currentText()
@@ -105,13 +133,27 @@ class ExportDialog(QDialog):
         
         self.pk_check.setEnabled(is_sql)
         self.json_check.setEnabled(is_sql)
+        self.flatten_check.setEnabled(is_sql)
+        self.normalize_check.setEnabled(is_sql)
         if not is_sql:
             self.pk_check.setChecked(False)
             self.json_check.setChecked(False)
+            self.flatten_check.setChecked(False)
+            self.normalize_check.setChecked(False)
+
+        # Toggle mutual exclusion between Store JSON and Flatten JSON
 
         # PostgreSQL specifics
         self.pg_ver_label.setVisible(is_pg)
         self.pg_ver_combo.setVisible(is_pg)
+
+        # Toggle dependent visibility
+        if not is_sql:
+            self.naming_label.setVisible(False)
+            self.naming_combo.setVisible(False)
+        else:
+            self.naming_label.setVisible(self.normalize_check.isChecked())
+            self.naming_combo.setVisible(self.normalize_check.isChecked())
 
     def get_settings(self):
         try:
@@ -131,6 +173,9 @@ class ExportDialog(QDialog):
             self.single_file_check.isChecked(),
             self.pk_check.isChecked(),
             self.json_check.isChecked(),
+            self.flatten_check.isChecked(),
+            self.normalize_check.isChecked(),
+            self.naming_combo.currentText() if self.normalize_check.isChecked() else None,
             self.pg_ver_combo.currentText() if self.combo.currentText() == "postgresql" else None,
             self.encoding_combo.currentText(),
             limit,

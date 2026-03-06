@@ -7,7 +7,7 @@ from datetime import datetime
 from pymongo import MongoClient
 from pymongo.errors import ConfigurationError, BulkWriteError
 from bson import json_util, ObjectId
-from utils.helpers import map_mongo_type_to_pg, sql_escape, filter_doc, resolve_sql_type
+from utils.helpers import map_mongo_type_to_pg, sql_escape, filter_doc, resolve_sql_type, to_snake_case, to_camel_case, flatten_dict
 
 
 # --- IMPORT WORKER (Fixed: Streaming) ---
@@ -117,7 +117,7 @@ def worker_import_task(uri, files, queue):
 
 
 # --- EXPORT WORKER (Fixed: Full Scan / Two-Pass) ---
-def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=None, add_pk=False, store_json=False, pg_version=None, encoding="utf-8", limit=0, date_range=None, queue=None):
+def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=None, add_pk=False, store_json=False, flatten_json=False, normalize=False, naming_conv="snake_case", pg_version=None, encoding="utf-8", limit=0, date_range=None, queue=None):
     """
     Export logic with Full Collection Scan for headers (CSV/SQL).
     """
@@ -152,6 +152,10 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
 
         # Pre-calculate single file path if needed
         single_file_path = None
+        single_file_path_norm = None
+        
+        format_func = to_snake_case if naming_conv == "snake_case" else to_camel_case
+        
         if (fmt in ["sql", "postgresql"]) and single_file:
             single_file_path = os.path.join(folder, f"dump_{db.name}_{int(time.time())}.sql")
             with open(single_file_path, "w", encoding=encoding, errors="replace") as f:
@@ -163,6 +167,18 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
                     f.write("SET check_function_bodies = false;\n")
                     f.write("SET client_min_messages = warning;\n")
                 f.write("BEGIN;\n\n")
+            
+            if normalize:
+                single_file_path_norm = os.path.join(folder, f"dump_{format_func(db.name)}_{int(time.time())}_normalized.sql")
+                with open(single_file_path_norm, "w", encoding=encoding, errors="replace") as f:
+                    f.write(f"-- Export: {db.name} (Normalized, {naming_conv}) | {time.ctime()}\n")
+                    if fmt == "postgresql":
+                        f.write(f"-- Target PostgreSQL Version: {pg_version}\n")
+                        f.write(f"SET client_encoding = '{'UTF8' if encoding.lower() == 'utf-8' else 'ASCII'}';\n")
+                        f.write("SET standard_conforming_strings = on;\n")
+                        f.write("SET check_function_bodies = false;\n")
+                        f.write("SET client_min_messages = warning;\n")
+                    f.write("BEGIN;\n\n")
 
         # Create Date Filter Query if provided
         date_query = {}
@@ -197,6 +213,14 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
                     
                     for doc in cursor:
                         doc = filter_doc(doc, include_meta)
+                        if flatten_json:
+                            # Strip _id temporarily to avoid flattening its nested parts if it's somehow an object, 
+                            # though mostly it's to treat the rest of the doc as flat
+                            doc_id = doc.pop('_id', None)
+                            doc = flatten_dict(doc)
+                            if doc_id is not None:
+                                doc['_id'] = doc_id
+                        
                         all_keys.update(doc.keys())
                         
                         if fmt != "csv": # Collect types for SQL
@@ -233,6 +257,12 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
 
                             for doc in cursor_write:
                                 doc = filter_doc(doc, include_meta)
+                                if flatten_json:
+                                    doc_id = doc.pop('_id', None)
+                                    doc = flatten_dict(doc)
+                                    if doc_id is not None:
+                                        doc['_id'] = doc_id
+                                
                                 # Flat conversion for nested objects
                                 row = {}
                                 for k in sorted_keys:
@@ -244,101 +274,123 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
                                 writer.writerow(row)
 
                     elif fmt in ["sql", "postgresql"]:
-                         # Determine target file
-                         if single_file:
-                             target_path = single_file_path
-                             mode = "a"
-                         else:
-                             target_path = os.path.join(folder, f"{name}.sql")
-                             mode = "w"
+                         runs = [False]
+                         if normalize:
+                             runs.append(True)
                          
-                         with open(target_path, mode, encoding=encoding, errors="replace") as f:
-                            if mode == "w":
-                                f.write(f"-- Export: {db.name} | Collection: {name} | {time.ctime()}\n")
-                                if fmt == "postgresql":
-                                    f.write(f"-- Target PostgreSQL Version: {pg_version}\n")
-                                    f.write(f"SET client_encoding = '{'UTF8' if encoding.lower() == 'utf-8' else 'ASCII'}';\n")
-                                    f.write("SET standard_conforming_strings = on;\n")
-                                    f.write("SET check_function_bodies = false;\n")
-                                    f.write("SET client_min_messages = warning;\n")
-                                f.write("BEGIN;\n\n")
+                         for is_normalized in runs:
+                             # Determine target file
+                             if single_file:
+                                 target_path = single_file_path_norm if is_normalized else single_file_path
+                                 mode = "a"
+                             else:
+                                 suffix = "_normalized" if is_normalized else ""
+                                 safe_name = format_func(name) if is_normalized else name
+                                 target_path = os.path.join(folder, f"{safe_name}{suffix}.sql")
+                                 mode = "w"
+                             
+                             with open(target_path, mode, encoding=encoding, errors="replace") as f:
+                                if mode == "w":
+                                    f.write(f"-- Export: {db.name} | Collection: {name} | {time.ctime()}\n")
+                                    if fmt == "postgresql":
+                                        f.write(f"-- Target PostgreSQL Version: {pg_version}\n")
+                                        f.write(f"SET client_encoding = '{'UTF8' if encoding.lower() == 'utf-8' else 'ASCII'}';\n")
+                                        f.write("SET standard_conforming_strings = on;\n")
+                                        f.write("SET check_function_bodies = false;\n")
+                                        f.write("SET client_min_messages = warning;\n")
+                                    f.write("BEGIN;\n\n")
 
-                            # Resolve SQL Types
-                            columns = {}
-                            if add_pk:
-                                if fmt == "postgresql":
-                                    columns["id"] = "SERIAL PRIMARY KEY"
-                                else:
-                                    columns["id"] = "INTEGER PRIMARY KEY AUTOINCREMENT"
-                            
-                            if include_meta:
-                                columns["_id"] = "TEXT" # Remove PK from _id if we have a real PK
-                                if not add_pk:
-                                    columns["_id"] = "TEXT PRIMARY KEY"
-
-                            for key, types_set in field_types.items():
-                                columns[key] = resolve_sql_type(types_set, key)
-
-                            f.write(f"-- Table: {name}\n")
-                            cols_def = ",\n    ".join([f'"{c}" {t}' for c, t in columns.items()])
-                            f.write(f'CREATE TABLE IF NOT EXISTS "{name}" (\n    {cols_def}\n);\n')
-
-                            # Safer Insert Logic
-                            start_stmt = f'INSERT INTO "{name}"'
-                            end_stmt = ";"
-                            
-                            if fmt == "postgresql":
-                                end_stmt = " ON CONFLICT DO NOTHING;"
-                            else: # sql
-                                start_stmt = f'INSERT OR IGNORE INTO "{name}"'
-
-                            f.write(f'{start_stmt} ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n')
-
-                            batch = []
-                            cursor_write = db[name].find(date_query)
-                            if limit > 0:
-                                cursor_write = cursor_write.limit(limit)
-
-                            first_batch = True
-                            pk_counter = 1
-                            
-                            for doc in cursor_write:
-                                doc = filter_doc(doc, include_meta)
-                                vals = []
-                                for col in columns.keys():
-                                    if col == "id" and add_pk:
-                                        vals.append(str(pk_counter))
-                                        continue
-                                    
-                                    val = doc.get(col, None)
-                                    if col == "_id" and val is not None:
-                                        val = str(val)
-                                    
-                                    # Handle JSON serialization if enabled and val is dict/list
-                                    if store_json and isinstance(val, (dict, list)):
-                                        val = json_util.dumps(val)
-
-                                    vals.append(sql_escape(val, col))
+                                # Resolve SQL Types
+                                columns = {}
+                                col_mapping = {}
+                                if add_pk:
+                                    if fmt == "postgresql":
+                                        columns["id"] = "SERIAL PRIMARY KEY"
+                                    else:
+                                        columns["id"] = "INTEGER PRIMARY KEY AUTOINCREMENT"
+                                    col_mapping["id"] = "id"
                                 
-                                if add_pk: pk_counter += 1
-                                batch.append(f"({', '.join(vals)})")
+                                if include_meta:
+                                    columns["_id"] = "TEXT" # Remove PK from _id if we have a real PK
+                                    if not add_pk:
+                                        columns["_id"] = "TEXT PRIMARY KEY"
+                                    col_mapping["_id"] = "_id"
+
+                                table_name = format_func(name) if is_normalized else name
+
+                                for key, types_set in field_types.items():
+                                    col_name = format_func(key) if is_normalized else key
+                                    columns[col_name] = resolve_sql_type(types_set, key)
+                                    col_mapping[col_name] = key
+
+                                f.write(f"-- Table: {table_name}\n")
+                                cols_def = ",\n    ".join([f'"{c}" {t}' for c, t in columns.items()])
+                                f.write(f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n    {cols_def}\n);\n')
+
+                                # Safer Insert Logic
+                                start_stmt = f'INSERT INTO "{table_name}"'
+                                end_stmt = ";"
                                 
-                                if len(batch) >= 500:
-                                    # If not first batch, start a new INSERT statement
+                                if fmt == "postgresql":
+                                    end_stmt = " ON CONFLICT DO NOTHING;"
+                                else: # sql
+                                    start_stmt = f'INSERT OR IGNORE INTO "{table_name}"'
+
+                                f.write(f'{start_stmt} ({", ".join([chr(34) + c + chr(34) for c in columns.keys()])}) VALUES\n')
+
+                                batch = []
+                                # Rewind cursor for data
+                                cursor_write = db[name].find(date_query)
+                                if limit > 0:
+                                    cursor_write = cursor_write.limit(limit)
+
+                                first_batch = True
+                                pk_counter = 1
+                                
+                                for doc in cursor_write:
+                                    doc = filter_doc(doc, include_meta)
+                                    if flatten_json:
+                                        doc_id = doc.pop('_id', None)
+                                        doc = flatten_dict(doc)
+                                        if doc_id is not None:
+                                            doc['_id'] = doc_id
+                                    
+                                    vals = []
+                                    for col in columns.keys():
+                                        orig_key = col_mapping[col]
+                                        if orig_key == "id" and add_pk:
+                                            vals.append(str(pk_counter))
+                                            continue
+                                        
+                                        val = doc.get(orig_key, None)
+                                        if orig_key == "_id" and val is not None:
+                                            val = str(val)
+                                        
+                                        # Handle JSON serialization if enabled and val is dict/list
+                                        if store_json and isinstance(val, (dict, list)):
+                                            val = json_util.dumps(val)
+
+                                        vals.append(sql_escape(val, col))
+                                    
+                                    if add_pk: pk_counter += 1
+                                    batch.append(f"({', '.join(vals)})")
+                                    
+                                    if len(batch) >= 500:
+                                        # If not first batch, start a new INSERT statement
+                                        if not first_batch:
+                                            f.write(f'{start_stmt} ({", ".join([chr(34) + c + chr(34) for c in columns.keys()])}) VALUES\n')
+                                        
+                                        f.write(",\n".join(batch) + end_stmt + "\n\n")
+                                        batch = []
+                                        first_batch = False
+                                
+                                if batch:
                                     if not first_batch:
-                                        f.write(f'{start_stmt} ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n')
-                                    
+                                         f.write(f'{start_stmt} ({", ".join([chr(34) + c + chr(34) for c in columns.keys()])}) VALUES\n')
                                     f.write(",\n".join(batch) + end_stmt + "\n\n")
-                                    batch = []
-                                    first_batch = False
-                            
-                            if batch:
-                                if not first_batch:
-                                     f.write(f'{start_stmt} ({", ".join(['"' + c + '"' for c in columns.keys()])}) VALUES\n')
-                                f.write(",\n".join(batch) + end_stmt + "\n\n")
 
-                            if mode == "w":
-                                f.write("COMMIT;\n")
+                                if mode == "w":
+                                    f.write("COMMIT;\n")
 
                 else:
                     # JSON/BSON (Already decent, but keeping consistency)
@@ -369,6 +421,9 @@ def worker_export_task(uri, folder, fmt, include_meta, single_file, collections=
 
         if single_file_path:
              with open(single_file_path, "a", encoding=encoding, errors="replace") as f:
+                 f.write("COMMIT;\n")
+        if single_file_path_norm:
+             with open(single_file_path_norm, "a", encoding=encoding, errors="replace") as f:
                  f.write("COMMIT;\n")
 
         queue.put(("finished", "Bulk Export Complete."))
